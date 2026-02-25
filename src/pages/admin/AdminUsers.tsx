@@ -7,11 +7,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Users, Loader2, ChevronLeft, ChevronRight, Eye, Edit, Plus, Trash2, Save, X, Search, XCircle } from "lucide-react";
-import { getUsersPaginated, getUsersCount, User, updateUserReferrer, searchUsers } from "@/lib/users";
+import { Users, Loader2, ChevronLeft, ChevronRight, Eye, Edit, Plus, Trash2, Save, X, Search, XCircle, Download } from "lucide-react";
+import { getUsersPaginated, getUsersCount, User, updateUserReferrer, searchUsers, getAllUsers } from "@/lib/users";
 import { getAllReferralCounts, getReferralsByReferrer, getReferralByReferred, Referral } from "@/lib/referrals";
-import { getUserNodePurchases, saveNodePurchase, deleteNodePurchase, updateNodePurchase, NodePurchase } from "@/lib/nodePurchases";
-import { getUserInvestments, saveUserInvestment, updateUserInvestment, deleteUserInvestment, UserInvestment } from "@/lib/userInvestments";
+import { getUserNodePurchases, saveNodePurchase, deleteNodePurchase, updateNodePurchase, NodePurchase, getAllNodePurchases } from "@/lib/nodePurchases";
+import { getUserInvestments, saveUserInvestment, updateUserInvestment, deleteUserInvestment, UserInvestment, getAllUserInvestments } from "@/lib/userInvestments";
 import { getAllNodes, NodeType } from "@/lib/nodes";
 import { getAllPlans, InvestmentPlan } from "@/lib/plans";
 import { getUserSBAGPositions, confirmSBAGPurchase, getAllSBAGPositions, SBAGPosition, updateSellDelegation } from "@/lib/sbagPositions";
@@ -20,6 +20,73 @@ import { formatAddress } from "@/lib/utils";
 import { QueryDocumentSnapshot, DocumentData } from "firebase/firestore";
 import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { format } from "date-fns";
+
+// ── CSV download helpers ─────────────────────────────────────────────────────
+function downloadCSV(rows: string[][], filename: string) {
+  const content = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function exportUsersCSV() {
+  const users = await getAllUsers();
+  const rows = [
+    ["Wallet", "Referral Code", "Referrer Code", "Referrer Wallet", "Registered", "Created At"],
+    ...users.map((u) => [
+      u.walletAddress,
+      u.referralCode,
+      u.referrerCode || "",
+      u.referrerWallet || "",
+      u.isRegistered ? "Yes" : "No",
+      format(new Date(u.createdAt), "yyyy-MM-dd HH:mm"),
+    ]),
+  ];
+  downloadCSV(rows, `users_${format(new Date(), "yyyyMMdd")}.csv`);
+}
+
+async function exportInvestmentsCSV() {
+  const investments = await getAllUserInvestments();
+  const rows = [
+    ["Wallet", "Category", "Project", "Amount", "Token Amount", "Token Value", "P/L", "Date", "Tx Hash"],
+    ...investments.map((inv) => [
+      inv.userId,
+      inv.category,
+      inv.projectName,
+      (inv.amount || 0).toFixed(2),
+      (inv.tokenAmount ?? "").toString(),
+      (inv.tokenValueUSDT ?? "").toString(),
+      (inv.profit ?? "").toString(),
+      format(new Date(inv.investedAt), "yyyy-MM-dd HH:mm"),
+      inv.transactionHash || "",
+    ]),
+  ];
+  downloadCSV(rows, `investments_${format(new Date(), "yyyyMMdd")}.csv`);
+}
+
+async function exportNodePurchasesCSV() {
+  const purchases = await getAllNodePurchases();
+  const rows = [
+    ["Wallet", "Node Name", "NodeId", "정가(USDT)", "실제투자금(USDT)", "Status", "Purchase Date", "Tx Hash", "Memo"],
+    ...purchases.map((p) => [
+      p.userId,
+      p.nodeName,
+      String(p.nodeId),
+      (p.nodePrice || 0).toFixed(2),
+      (p.actualAmount !== undefined ? p.actualAmount : p.nodePrice || 0).toFixed(2),
+      p.status,
+      format(new Date(p.purchaseDate), "yyyy-MM-dd HH:mm"),
+      p.transactionHash || "",
+      p.memo || "",
+    ]),
+  ];
+  downloadCSV(rows, `node_purchases_${format(new Date(), "yyyyMMdd")}.csv`);
+}
 
 const PAGE_SIZE = 20;
 
@@ -36,6 +103,14 @@ export const AdminUsers = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [referralCounts, setReferralCounts] = useState<{ [key: string]: number }>({});
+  // 유저별 투자합계 (wallet.toLowerCase() -> 값)
+  const [userNodeTotals, setUserNodeTotals]   = useState<{ [wallet: string]: { price: number; actual: number; count: number } }>({});
+  const [userInvestTotals, setUserInvestTotals] = useState<{ [wallet: string]: number }>({});
+  const [totalsLoaded, setTotalsLoaded] = useState(false);
+  // 전체 합계 (모든 유저 통합)
+  const [grandNodeTotal,   setGrandNodeTotal]   = useState(0);
+  const [grandInvestTotal, setGrandInvestTotal] = useState(0);
+  const [grandNodeCount,   setGrandNodeCount]   = useState(0);
   const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [totalUsers, setTotalUsers] = useState(0);
@@ -86,6 +161,46 @@ export const AdminUsers = () => {
       }
     };
     loadReferralCounts();
+  }, []);
+
+  // 전체 Node/Investment 합계 한 번에 로드 (유저 목록 테이블용)
+  useEffect(() => {
+    const loadTotals = async () => {
+      try {
+        const [allNodePurchases, allInvests] = await Promise.all([
+          getAllNodePurchases(),
+          getAllUserInvestments(),
+        ]);
+        // Node totals per user
+        const nodeTotals: { [w: string]: { price: number; actual: number; count: number } } = {};
+        allNodePurchases.forEach((p) => {
+          const w = p.userId.toLowerCase();
+          if (!nodeTotals[w]) nodeTotals[w] = { price: 0, actual: 0, count: 0 };
+          nodeTotals[w].price  += p.nodePrice || 0;
+          nodeTotals[w].actual += p.actualAmount !== undefined ? p.actualAmount : (p.nodePrice || 0);
+          nodeTotals[w].count  += 1;
+        });
+        // Investment totals per user
+        const investTotals: { [w: string]: number } = {};
+        allInvests.forEach((inv) => {
+          const w = inv.userId.toLowerCase();
+          investTotals[w] = (investTotals[w] || 0) + (inv.amount || 0);
+        });
+        setUserNodeTotals(nodeTotals);
+        setUserInvestTotals(investTotals);
+        // ── 전체 합계 계산 ──────────────────────────────────────────
+        const gNode   = Object.values(nodeTotals).reduce((s, v) => s + v.actual, 0);
+        const gInvest = Object.values(investTotals).reduce((s, v) => s + v, 0);
+        const gCount  = Object.values(nodeTotals).reduce((s, v) => s + v.count, 0);
+        setGrandNodeTotal(gNode);
+        setGrandInvestTotal(gInvest);
+        setGrandNodeCount(gCount);
+        setTotalsLoaded(true);
+      } catch (err) {
+        console.error("Error loading totals:", err);
+      }
+    };
+    loadTotals();
   }, []);
 
   // Load nodes and plans
@@ -516,19 +631,77 @@ export const AdminUsers = () => {
   return (
     <Card className="border-border/60">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Users className="w-4 h-4 text-primary" />
-          User Management System
-        </CardTitle>
-        <CardDescription>
-          {isSearching 
-            ? `Search results • Page ${currentPage + 1}`
-            : totalUsers > 0 
-              ? `${totalUsers.toLocaleString()} total users` 
-              : "Loading users..."} • Page {currentPage + 1}
-        </CardDescription>
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <Users className="w-4 h-4 text-primary" />
+              User Management System
+            </CardTitle>
+            <CardDescription>
+              {isSearching 
+                ? `Search results • Page ${currentPage + 1}`
+                : totalUsers > 0 
+                  ? `${totalUsers.toLocaleString()} total users` 
+                  : "Loading users..."} • Page {currentPage + 1}
+            </CardDescription>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={exportUsersCSV}>
+              <Download className="w-3.5 h-3.5" />
+              Users CSV
+            </Button>
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={exportInvestmentsCSV}>
+              <Download className="w-3.5 h-3.5" />
+              Investments CSV
+            </Button>
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={exportNodePurchasesCSV}>
+              <Download className="w-3.5 h-3.5" />
+              Nodes CSV
+            </Button>
+          </div>
+        </div>
       </CardHeader>
       <CardContent>
+        {/* ── 전체 투자금 합계 요약 ──────────────────────────────────── */}
+        <div className="mb-6 grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 flex flex-col gap-1">
+            <p className="text-xs text-muted-foreground">수 Node투자 (실제)</p>
+            {totalsLoaded ? (
+              <p className="text-xl font-bold text-primary">
+                ${grandNodeTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                <span className="text-xs font-normal text-muted-foreground ml-2">USDT</span>
+              </p>
+            ) : (
+              <p className="text-sm text-muted-foreground animate-pulse">Loading…</p>
+            )}
+            {totalsLoaded && (
+              <p className="text-xs text-muted-foreground">{grandNodeCount}개 노드</p>
+            )}
+          </div>
+          <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 px-4 py-3 flex flex-col gap-1">
+            <p className="text-xs text-muted-foreground">수 Investment합계</p>
+            {totalsLoaded ? (
+              <p className="text-xl font-bold text-blue-400">
+                ${grandInvestTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                <span className="text-xs font-normal text-muted-foreground ml-2">USDT</span>
+              </p>
+            ) : (
+              <p className="text-sm text-muted-foreground animate-pulse">Loading…</p>
+            )}
+          </div>
+          <div className="rounded-xl border border-green-500/30 bg-green-500/5 px-4 py-3 flex flex-col gap-1">
+            <p className="text-xs text-muted-foreground">수 투자금 합계 (Node + Investment)</p>
+            {totalsLoaded ? (
+              <p className="text-xl font-bold text-green-400">
+                ${(grandNodeTotal + grandInvestTotal).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                <span className="text-xs font-normal text-muted-foreground ml-2">USDT</span>
+              </p>
+            ) : (
+              <p className="text-sm text-muted-foreground animate-pulse">Loading…</p>
+            )}
+          </div>
+        </div>
+
         {/* Search Section */}
         <div className="mb-6 space-y-4 p-4 bg-background/50 rounded-lg border border-border/50">
           <div className="flex items-center gap-2 mb-4">
@@ -627,6 +800,8 @@ export const AdminUsers = () => {
                   <TableHead>Referrer</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Referred</TableHead>
+                  <TableHead className="text-right">Node투자 (실제)</TableHead>
+                  <TableHead className="text-right">Investment합계</TableHead>
                   <TableHead>Joined</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -654,6 +829,25 @@ export const AdminUsers = () => {
                     </TableCell>
                     <TableCell className="text-right">
                       {referralCounts[user.walletAddress.toLowerCase()] || 0}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs">
+                      {(() => {
+                        const t = userNodeTotals[user.walletAddress.toLowerCase()];
+                        if (!t || t.count === 0) return <span className="text-muted-foreground">-</span>;
+                        return (
+                          <span className="text-primary font-semibold">
+                            ${t.actual.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                            <span className="text-muted-foreground font-normal ml-1">({t.count})</span>
+                          </span>
+                        );
+                      })()}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs">
+                      {(() => {
+                        const amt = userInvestTotals[user.walletAddress.toLowerCase()] || 0;
+                        if (amt === 0) return <span className="text-muted-foreground">-</span>;
+                        return <span className="font-semibold">${amt.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>;
+                      })()}
                     </TableCell>
                     <TableCell>{formatDate(user.createdAt)}</TableCell>
                     <TableCell className="text-right">
