@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -8,79 +9,181 @@ import { ReferralTracker } from "@/components/ReferralTracker";
 import { LoomxReferralGuard } from "@/components/LoomxReferralGuard";
 import { LanguageProvider } from "@/lib/i18n/LanguageContext";
 import { TermsAgreement } from "@/components/TermsAgreement";
+import { UserNoticePopup } from "@/components/UserNoticePopup";
 import { CartProvider } from "@/contexts/CartContext";
+import { AuthProvider } from "@/contexts/AuthContext";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { Loader2 } from "lucide-react";
+import Footer from "@/components/Footer";
+import BottomNav from "@/components/BottomNav";
+import { StakingMaturityChecker } from "@/components/StakingMaturityChecker";
+import { OnboardingGuide } from "@/components/OnboardingGuide";
+import { RouteChangeGuard } from "@/components/RouteChangeGuard";
+
+// ── Always-eager (small, critical path) ─────────────────────────────────────
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
-import Investment from "./pages/Investment";
-import Staking from "./pages/Staking";
-import Profile from "./pages/Profile";
-import Community from "./pages/Community";
-import Cart from "./pages/Cart";
-import Introduction from "./pages/Introduction";
-import Tutorial from "./pages/Tutorial";
-import AdminLogin from "./pages/admin/AdminLogin";
-import AdminLayout from "./pages/admin/AdminLayout";
-import AdminDashboard from "./pages/admin/AdminDashboard";
-import AdminAddPlans from "./pages/admin/AdminAddPlans";
-import AdminStakingPlans from "./pages/admin/AdminStakingPlans";
-import AdminNodes from "./pages/admin/AdminNodes";
-import AdminNotices from "./pages/admin/AdminNotices";
-import AdminAds from "./pages/admin/AdminAds";
-import AdminReferred from "./pages/admin/AdminReferred";
-import AdminUsers from "./pages/admin/AdminUsers";
-import AdminTotalEarning from "./pages/admin/AdminTotalEarning";
-import AdminRouteGuard from "./pages/admin/AdminRouteGuard";
+import AdminRouteGuard, { AdminPermissionGuard } from "./pages/admin/AdminRouteGuard";
 
-const queryClient = new QueryClient();
+// ── Lazy-loaded pages (chunked by route) ─────────────────────────────────────
+const Onboarding          = lazy(() => import("./pages/Onboarding"));
+const Login               = lazy(() => import("./pages/Login"));
+const SignUp              = lazy(() => import("./pages/SignUp"));
+const ResetPassword       = lazy(() => import("./pages/ResetPassword"));
+const Investment          = lazy(() => import("./pages/Investment"));
+const Staking             = lazy(() => import("./pages/Staking"));
+const Profile             = lazy(() => import("./pages/Profile"));
+const Cart                = lazy(() => import("./pages/Cart"));
+const Introduction        = lazy(() => import("./pages/Introduction"));
+const Tutorial            = lazy(() => import("./pages/Tutorial"));
+const Support             = lazy(() => import("./pages/Support"));
+const CompanyRegistration = lazy(() => import("./pages/CompanyRegistration"));
+const InvestmentHistory   = lazy(() => import("./pages/InvestmentHistory"));
+const Promo               = lazy(() => import("./pages/Promo"));
+const PromoDetail         = lazy(() => import("./pages/PromoDetail"));
+const Notices             = lazy(() => import("./pages/Notices"));
+const NoticeDetail        = lazy(() => import("./pages/NoticeDetail"));
+const Community           = lazy(() => import("./pages/Community"));
+const Earnings            = lazy(() => import("./pages/Earnings"));
+const Airdrop             = lazy(() => import("./pages/Airdrop"));
+
+// Admin pages — separate chunk
+const AdminLogin    = lazy(() => import("./pages/admin/AdminLogin"));
+const AdminLayout   = lazy(() => import("./pages/admin/AdminLayout"));
+const AdminDashboard      = lazy(() => import("./pages/admin/AdminDashboard"));
+const AdminPlans          = lazy(() => import("./pages/admin/AdminPlans"));
+const AdminContent        = lazy(() => import("./pages/admin/AdminContent"));
+const AdminUsersOrg       = lazy(() => import("./pages/admin/AdminUsersOrg"));
+const AdminAssets         = lazy(() => import("./pages/admin/AdminAssets"));
+const AdminSupport        = lazy(() => import("./pages/admin/AdminSupport"));
+const AdminNotifications  = lazy(() => import("./pages/admin/AdminNotifications"));
+const AdminAirdrop        = lazy(() => import("./pages/admin/AdminAirdrop"));
+const AdminSubAdmins      = lazy(() => import("./pages/admin/AdminSubAdmins"));
+
+// ── Loading fallback ──────────────────────────────────────────────────────────
+const PageLoader = () => (
+  <div className="min-h-screen flex items-center justify-center bg-background">
+    <Loader2 className="w-8 h-8 animate-spin text-primary" />
+  </div>
+);
+
+// ── QueryClient ───────────────────────────────────────────────────────────────
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 1000 * 60, // 1분간 캐시 유효
+      retry: 2,
+    },
+  },
+});
 
 const App = () => (
-  <LanguageProvider>
-    <WalletProvider>
-      <CartProvider>
-        <QueryClientProvider client={queryClient}>
-          <TooltipProvider>
-            <TermsAgreement />
-            <ReferralTracker />
-            <LoomxReferralGuard />
-            <Toaster />
-            <Sonner />
-            <BrowserRouter>
-            <Routes>
-              {/* Admin routes */}
-              <Route path="/admin" element={<AdminLogin />} />
-              <Route element={<AdminRouteGuard />}>
-                <Route path="/admin" element={<AdminLayout />}>
-                  <Route path="dashboard" element={<AdminDashboard />} />
-                  <Route path="add-plans" element={<AdminAddPlans />} />
-                  <Route path="staking-plans" element={<AdminStakingPlans />} />
-                  <Route path="nodes" element={<AdminNodes />} />
-                  <Route path="notices" element={<AdminNotices />} />
-                  <Route path="ads" element={<AdminAds />} />
-                  <Route path="referred" element={<AdminReferred />} />
-                  <Route path="users" element={<AdminUsers />} />
-                  <Route path="total-earning" element={<AdminTotalEarning />} />
-                </Route>
-              </Route>
+  <div translate="no" className="notranslate" suppressHydrationWarning>
+  <ErrorBoundary>
+    <BrowserRouter>
+      <LanguageProvider>
+        <AuthProvider>
+        <WalletProvider>
+          <CartProvider>
+            <QueryClientProvider client={queryClient}>
+              <TooltipProvider>
+                <RouteChangeGuard />
+                <TermsAgreement />
+                <UserNoticePopup />
+                <ReferralTracker />
+                <LoomxReferralGuard />
+                <StakingMaturityChecker />
+                <OnboardingGuide />
+                <Toaster />
+                <Sonner />
+                <Suspense fallback={<PageLoader />}>
+                  <Routes>
+                    {/* Admin routes */}
+                    <Route path="/admin" element={<AdminLogin />} />
+                    <Route element={<AdminRouteGuard />}>
+                      <Route path="/admin" element={<AdminLayout />}>
+                        {/* 권한 기반 라우트 */}
+                        <Route element={<AdminPermissionGuard routeKey="dashboard" />}>
+                          <Route path="dashboard"   element={<ErrorBoundary><AdminDashboard /></ErrorBoundary>} />
+                        </Route>
+                        <Route element={<AdminPermissionGuard routeKey="plans" />}>
+                          <Route path="plans"       element={<ErrorBoundary><AdminPlans /></ErrorBoundary>} />
+                        </Route>
+                        <Route element={<AdminPermissionGuard routeKey="content" />}>
+                          <Route path="content"     element={<ErrorBoundary><AdminContent /></ErrorBoundary>} />
+                        </Route>
+                        <Route element={<AdminPermissionGuard routeKey="users-org" />}>
+                          <Route path="users-org"   element={<ErrorBoundary><AdminUsersOrg /></ErrorBoundary>} />
+                        </Route>
+                        <Route element={<AdminPermissionGuard routeKey="assets" />}>
+                          <Route path="assets"      element={<ErrorBoundary><AdminAssets /></ErrorBoundary>} />
+                        </Route>
+                        <Route element={<AdminPermissionGuard routeKey="support" />}>
+                          <Route path="support"         element={<ErrorBoundary><AdminSupport /></ErrorBoundary>} />
+                        </Route>
+                        <Route element={<AdminPermissionGuard routeKey="notifications" />}>
+                          <Route path="notifications"   element={<ErrorBoundary><AdminNotifications /></ErrorBoundary>} />
+                        </Route>
+                        <Route element={<AdminPermissionGuard routeKey="airdrop" />}>
+                          <Route path="airdrop"          element={<ErrorBoundary><AdminAirdrop /></ErrorBoundary>} />
+                        </Route>
+                        <Route element={<AdminPermissionGuard routeKey="sub-admins" />}>
+                          <Route path="sub-admins"       element={<ErrorBoundary><AdminSubAdmins /></ErrorBoundary>} />
+                        </Route>
+                        {/* 구 URL 하위호환 */}
+                        <Route path="add-plans"           element={<AdminPlans />} />
+                        <Route path="staking-plans"       element={<AdminPlans />} />
+                        <Route path="nodes"               element={<AdminAssets />} />
+                        <Route path="notices"             element={<AdminContent />} />
+                        <Route path="ads"                 element={<AdminContent />} />
+                        <Route path="announcements"       element={<AdminContent />} />
+                        <Route path="event-banners"       element={<AdminContent />} />
+                        <Route path="referred"            element={<AdminUsersOrg />} />
+                        <Route path="users"               element={<AdminUsersOrg />} />
+                        <Route path="organization"        element={<AdminUsersOrg />} />
+                        <Route path="total-earning"       element={<AdminAssets />} />
+                        <Route path="company-applications" element={<AdminUsersOrg />} />
+                      </Route>
+                    </Route>
 
-              {/* Public routes */}
-              <Route path="/" element={<Index />} />
-              <Route path="/cart" element={<Cart />} />
-              <Route path="/investment" element={<Investment />} />
-              <Route path="/staking" element={<Staking />} />
-              <Route path="/profile" element={<Profile />} />
-              <Route path="/community" element={<Community />} />
-              <Route path="/introduction" element={<Introduction />} />
-              <Route path="/tutorial" element={<Tutorial />} />
+                    {/* Auth routes */}
+                    <Route path="/onboarding"    element={<ErrorBoundary><Onboarding /></ErrorBoundary>} />
+                    <Route path="/login"          element={<ErrorBoundary><Login /></ErrorBoundary>} />
+                    <Route path="/signup"         element={<ErrorBoundary><SignUp /></ErrorBoundary>} />
+                    <Route path="/reset-password" element={<ErrorBoundary><ResetPassword /></ErrorBoundary>} />
 
-              {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-            </BrowserRouter>
-          </TooltipProvider>
-        </QueryClientProvider>
-      </CartProvider>
-    </WalletProvider>
-  </LanguageProvider>
+                    {/* Public routes — each wrapped in its own ErrorBoundary */}
+                    <Route path="/"     element={<Index />} />
+                    <Route path="/cart" element={<ErrorBoundary><Cart /></ErrorBoundary>} />
+                    <Route path="/investment" element={<ErrorBoundary><Investment /></ErrorBoundary>} />
+                    <Route path="/staking"    element={<ErrorBoundary><Staking /></ErrorBoundary>} />
+                    <Route path="/profile"    element={<ErrorBoundary inline><Profile /></ErrorBoundary>} />
+                    <Route path="/history"    element={<ErrorBoundary><InvestmentHistory /></ErrorBoundary>} />
+                    <Route path="/earnings"   element={<ErrorBoundary><Earnings /></ErrorBoundary>} />
+                    <Route path="/airdrop"    element={<ErrorBoundary><Airdrop /></ErrorBoundary>} />
+                    <Route path="/community"  element={<ErrorBoundary><Community /></ErrorBoundary>} />
+                    <Route path="/introduction" element={<ErrorBoundary><Introduction /></ErrorBoundary>} />
+                    <Route path="/tutorial"     element={<ErrorBoundary><Tutorial /></ErrorBoundary>} />
+                    <Route path="/support"      element={<ErrorBoundary><Support /></ErrorBoundary>} />
+                    <Route path="/company-registration" element={<ErrorBoundary><CompanyRegistration /></ErrorBoundary>} />
+                    <Route path="/promo"        element={<ErrorBoundary><Promo /></ErrorBoundary>} />
+                    <Route path="/promo/:planId" element={<ErrorBoundary><PromoDetail /></ErrorBoundary>} />
+                    <Route path="/notices"       element={<ErrorBoundary><Notices /></ErrorBoundary>} />
+                    <Route path="/notices/:id"   element={<ErrorBoundary><NoticeDetail /></ErrorBoundary>} />
+                    <Route path="*"              element={<NotFound />} />
+                  </Routes>
+                </Suspense>
+                <Footer />
+                <BottomNav />
+              </TooltipProvider>
+            </QueryClientProvider>
+          </CartProvider>
+        </WalletProvider>
+        </AuthProvider>
+      </LanguageProvider>
+    </BrowserRouter>
+  </ErrorBoundary>
+  </div>
 );
 
 export default App;
