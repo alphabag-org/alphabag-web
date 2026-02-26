@@ -41,6 +41,46 @@ export function getOrCreateReferralCode(address?: string | null): string {
 }
 
 /**
+ * Get the plans parameter from URL
+ * Format: ?referral=0x...&plans=plan_xxx,plan_yyy
+ * Returns array of plan IDs or null
+ */
+export function getPlansFromURL(): string[] | null {
+  if (typeof window === "undefined") return null;
+  const params = new URLSearchParams(window.location.search);
+  const plans = params.get("plans");
+  if (!plans) return null;
+  const ids = plans.split(",").map((s) => s.trim()).filter(Boolean);
+  return ids.length > 0 ? ids : null;
+}
+
+const PROMO_PLANS_KEY = "alphabag_promo_plans";
+
+/**
+ * Save promo plan IDs (from &plans= URL param) to localStorage
+ */
+export function savePromoPlans(planIds: string[]): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(PROMO_PLANS_KEY, JSON.stringify(planIds));
+}
+
+/**
+ * Get saved promo plan IDs from localStorage (then clear)
+ */
+export function consumePromoPlans(): string[] | null {
+  if (typeof window === "undefined") return null;
+  const raw = localStorage.getItem(PROMO_PLANS_KEY);
+  if (!raw) return null;
+  localStorage.removeItem(PROMO_PLANS_KEY);
+  try {
+    const ids = JSON.parse(raw);
+    return Array.isArray(ids) && ids.length > 0 ? ids : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Get the referral wallet address from URL parameters
  * Format: ?referral=0x...
  */
@@ -214,7 +254,7 @@ export function getReferrerWallet(): string | null {
  * Format: https://alpha-bag.com/?referral=0x...
  */
 export function generateReferralLink(baseUrl?: string, address?: string | null): string {
-  const url = baseUrl || (typeof window !== "undefined" ? window.location.origin : "https://alphabag.net");
+  const url = baseUrl || (typeof window !== "undefined" ? window.location.origin : "");
   
   // Use wallet address directly in the referral parameter
   if (address && address !== "0x0000000000000000000000000000000000000000" && address.startsWith("0x")) {
