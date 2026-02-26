@@ -21,7 +21,7 @@ import {
 import { db } from "./firebase";
 
 export interface User {
-  id: string; // Wallet address
+  id: string; // Wallet address or Firebase UID
   walletAddress: string;
   referralCode: string;
   referrerCode: string | null;
@@ -30,6 +30,12 @@ export interface User {
   createdAt: number;
   updatedAt: number;
   lastConnectedAt: number;
+  // 이메일/소셜 로그인 필드
+  email?: string;
+  displayName?: string;
+  photoURL?: string;
+  authProvider?: "wallet" | "email" | "google"; // 로그인 방식
+  firebaseUid?: string; // Firebase Auth UID
 }
 
 const USERS_COLLECTION = "users";
@@ -61,7 +67,7 @@ function fromFirestore(docData: any, id: string): User {
 
 function toFirestore(user: Partial<User>): any {
   const now = Timestamp.now();
-  return {
+  const data: any = {
     walletAddress: user.walletAddress || user.id || "",
     referralCode: user.referralCode || "",
     referrerCode: user.referrerCode || null,
@@ -71,6 +77,13 @@ function toFirestore(user: Partial<User>): any {
     updatedAt: now,
     lastConnectedAt: now,
   };
+  // 이메일/소셜 로그인 선택 필드
+  if (user.email !== undefined) data.email = user.email;
+  if (user.displayName !== undefined) data.displayName = user.displayName;
+  if (user.photoURL !== undefined) data.photoURL = user.photoURL;
+  if (user.authProvider !== undefined) data.authProvider = user.authProvider;
+  if (user.firebaseUid !== undefined) data.firebaseUid = user.firebaseUid;
+  return data;
 }
 
 /**
@@ -327,6 +340,27 @@ export async function searchUsers(
       lastDoc: null,
       hasMore: false,
     };
+  }
+}
+
+/**
+ * Get user by referral code (6-digit code)
+ * Used to validate invite codes on onboarding
+ */
+export async function getUserByReferralCode(referralCode: string): Promise<User | null> {
+  try {
+    const usersRef = collection(db, USERS_COLLECTION);
+    const q = query(
+      usersRef,
+      where("referralCode", "==", referralCode.trim())
+    );
+    const querySnapshot = await getDocs(q);
+    if (querySnapshot.empty) return null;
+    const d = querySnapshot.docs[0];
+    return fromFirestore(d.data(), d.id);
+  } catch (error) {
+    console.error("Error getting user by referral code:", error);
+    return null;
   }
 }
 
