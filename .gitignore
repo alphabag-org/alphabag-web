@@ -1,0 +1,10 @@
+node_modules/
+dist/
+moonexe-clone/
+.env.local
+.env
+# temp / build artifacts
+core
+scripts/
+vite.config.ts.timestamp-*
+*.mjs.timestamp-*
